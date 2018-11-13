@@ -46,9 +46,9 @@ logger = logging.getLogger("library-check.py")
 
 logger.info("Activating library check")
 
-def get_credentials():
+def get_user_credentials():
     credentials_path = Path('user-credentials.json')
-    logger.info('Looking for user credentials at ' + str(credentials_path))
+    logger.info('Loading user credentials from %s ' % credentials_path)
     if credentials_path.is_file:
         with open(credentials_path) as f:
             credentials = json.load(f)
@@ -79,31 +79,48 @@ def get_due_dates(user_credentials):
         EVENT_VALIDATION_NAME: event_validation
     }
 
+    logger.info('Logging in')
     result = session_requests.post(
         LOGIN_URL, 
         data = payload, 
         headers = dict(referer=LOGIN_URL)
     )
+    if result.status_code != 200:
+        logger.error('Error logging in: %d - %s' % (result.status_code, result.reason))
+    else:
+        logger.info('Login successful')
 
+    logger.info('Navigating to items out page')
     result = session_requests.get(
         ITEMS_OUT_URL
     )
-    tree = html.fromstring(result.content)
+    if result.status_code != 200:
+        logger.error('Error retrieving items out page: %d - %s' % (result.status_code, result.reason))
+    else:
+        logger.info('Navigation successful')
 
+    tree = html.fromstring(result.content)
     items = []
 
     # Get number of items and search for the zero-indexed IDs of data we need 
     rows = list(set(tree.xpath("//table[@class='patrongrid']/tr[@class='patron-account__grid-row' or @class='patron-account__grid-alternating-row']")))
     for i in range(0, len(rows)):
-        item = {
-            'title': list(set(tree.xpath('//*[@id="BodyMainContent_GridView1_labelTitle_' + str(i) + '"]/a')))[0].text,
-            'due_date': list(set(tree.xpath('//*[@id="BodyMainContent_GridView1_labelDueDate_' + str(i) + '"]')))[0].text,
-            'renewals_left': list(set(tree.xpath('//*[@id="BodyMainContent_GridView1_labelRenewalsLeft_' + str(i) + '"]')))[0].text
-        }
-        items.append(item)
+        title = list(set(tree.xpath('//*[@id="BodyMainContent_GridView1_labelTitle_' + str(i) + '"]/a')))[0].text
+        
+        date = list(set(tree.xpath('//*[@id="BodyMainContent_GridView1_labelDueDate_' + str(i) + '"]')))[0].text
+        date = datetime.datetime.strptime(date, '%m/%d/%Y')
+        date = date.strftime('%Y-%m-%d')
 
-    foo = 0
-    return ['blah']
+        renewals_left = list(set(tree.xpath('//*[@id="BodyMainContent_GridView1_labelRenewalsLeft_' + str(i) + '"]')))[0].text
+        renewals_left = int(renewals_left)
+        item = {
+            'title': title,
+            'date': date,
+            'renewals_left': renewals_left
+        }
+        logger.info('Found due date: \'%s\' is due %s (%d renewals left)' % (title, date, renewals_left))
+        items.append(item)
+    return items
 
 def get_calendar_service():
     store = file.Storage('token.json')
@@ -114,20 +131,36 @@ def get_calendar_service():
     return build('calendar', 'v3', http=creds.authorize(Http()))
 
 def main():
-    user_credentials = get_credentials()
+    user_credentials = get_user_credentials()
 
     due_dates = get_due_dates(user_credentials)
 
+    service = get_calendar_service()
+
     # Remove existing events
-    events_response = service.events().list(calendarId=credentials['calendarId']).execute()
+    logger.info('Finding existing events')
+    events_response = service.events().list(calendarId=user_credentials['calendarId']).execute()
     events = events_response.get('items', [])
+    logger.info('Found %s events to remove' % len(events))
+    for event in events:
+        service.events().delete(calendarId=user_credentials['calendarId'], eventId=event['id']).execute()
+        logger.info('Removed event with ID %s' % event['id'])        
 
-    # for event in events:
-    #     service.events().delete(calendarId=CALENDAR_ID,
-    #                             eventId=event['id']).execute()
-
-    # for due_date in due_dates:
-
+    for due_date in due_dates:
+        logger.info('Creating event for %s' % due_date['title'])
+        event = {
+            'summary': due_date['title'],
+            'description': due_date['title'] + ' - Renewals left: ' + str(due_date['renewals_left']),
+            'start': {
+                'date': due_date['date'],
+            },
+            'end': {
+                'date': due_date['date'],
+            }
+        }
+        created_event = service.events().insert(calendarId = user_credentials['calendarId'], body=event).execute()
+        logger.info('Created event: ' + created_event.get('htmlLink'))
+    logger.info('Finished')
 
 if __name__ == '__main__':
     main()
