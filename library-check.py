@@ -63,6 +63,12 @@ def get_due_dates(user_credentials):
     logger.info('Getting library due dates')
     session_requests = requests.session()
     result = session_requests.get(LOGIN_URL)
+    if result.status_code != 200:
+        logger.error('Error logging in: %d - %s' % (result.status_code, result.reason))
+        sys.exit()
+    else:
+        logger.info('Login successful')
+
     tree = html.fromstring(result.text)
 
     view_state = list(set(tree.xpath("//input[@name='__VIEWSTATE']/@value")))[0]
@@ -87,6 +93,7 @@ def get_due_dates(user_credentials):
     )
     if result.status_code != 200:
         logger.error('Error logging in: %d - %s' % (result.status_code, result.reason))
+        sys.exit()
     else:
         logger.info('Login successful')
 
@@ -96,6 +103,7 @@ def get_due_dates(user_credentials):
     )
     if result.status_code != 200:
         logger.error('Error retrieving items out page: %d - %s' % (result.status_code, result.reason))
+        sys.exit()
     else:
         logger.info('Navigation successful')
 
@@ -128,7 +136,7 @@ def get_calendar_service():
     if not creds or creds.invalid:
         flow = client.flow_from_clientsecrets('credentials.json', SCOPES)
         creds = tools.run_flow(flow, store)
-    return build('calendar', 'v3', http=creds.authorize(Http()))
+    return build('calendar', 'v3', http=creds.authorize(Http()), cache_discovery=False)
 
 def main():
     user_credentials = get_user_credentials()
