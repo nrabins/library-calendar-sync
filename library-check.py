@@ -147,7 +147,7 @@ def main():
 
     # Remove existing events
     logger.info('Finding existing events')
-    events_response = service.events().list(calendarId=user_credentials['calendarId']).execute()
+    events_response = service.events().list(calendarId=user_credentials['calendarId'], singleEvents=True).execute()
     events = events_response.get('items', [])
     logger.info('Found %s events to remove' % len(events))
     for event in events:
