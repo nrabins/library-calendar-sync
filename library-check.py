@@ -118,15 +118,24 @@ def get_due_dates(user_credentials):
         date = list(set(tree.xpath('//*[@id="BodyMainContent_GridView1_labelDueDate_' + str(i) + '"]')))[0].text
         date = datetime.datetime.strptime(date, '%m/%d/%Y')
         date = date.strftime('%Y-%m-%d')
-
-        renewals_left = list(set(tree.xpath('//*[@id="BodyMainContent_GridView1_labelRenewalsLeft_' + str(i) + '"]')))[0].text
-        renewals_left = int(renewals_left)
+        
+        renewal_cell = tree.xpath('//*[@id="BodyMainContent_GridView1_labelRenewalsLeft_' + str(i) + '"]')
+        can_renew = len(renewal_cell) > 0
+        renewals_left = 0
+        if can_renew:
+            renewals_left = int(list(set(renewal_cell))[0].text)
+        
         item = {
             'title': title,
             'date': date,
-            'renewals_left': renewals_left
+            'renewals_left': renewals_left,
+            'can_renew': can_renew
         }
-        logger.info('Found due date: \'%s\' is due %s (%d renewals left)' % (title, date, renewals_left))
+        if can_renew:
+            logger.info('Found due date: \'%s\' is due %s (%d renewals left)' % (title, date, renewals_left))
+        else:
+            logger.info('Found due date: \'%s\' is due %s' % (title, date))
+
         items.append(item)
     return items
 
@@ -156,9 +165,15 @@ def main():
 
     for due_date in due_dates:
         logger.info('Creating event for %s' % due_date['title'])
+
+        if due_date['can_renew']:
+            description = due_date['title'] + ' - Renewals left: ' + str(due_date['renewals_left'])
+        else:
+            description = due_date['title'] + ' - Not renewable'
+
         event = {
             'summary': due_date['title'],
-            'description': due_date['title'] + ' - Renewals left: ' + str(due_date['renewals_left']),
+            'description': description,
             'start': {
                 'date': due_date['date'],
             },
